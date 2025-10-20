@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from uuid import UUID
+from datetime import datetime
 
 
 class ChatRequest(BaseModel):
@@ -8,6 +9,8 @@ class ChatRequest(BaseModel):
     user_id: UUID = Field(..., description="UUID of the user making the request")
     temperature: Optional[float] = Field(default=0.2, ge=0.0, le=2.0, description="Temperature for response generation")
     conversation_id: Optional[str] = Field(default=None, description="Optional conversation ID for multi-turn conversations")
+    user_datetime: Optional[datetime] = Field(default=None, description="Current datetime from user's timezone (ISO format)")
+    user_timezone: Optional[str] = Field(default=None, description="User's timezone name (e.g., 'Asia/Kolkata', 'America/New_York')")
 
     class Config:
         json_schema_extra = {
@@ -15,7 +18,9 @@ class ChatRequest(BaseModel):
                 "prompt": "I want to learn Python today for about 2 hours",
                 "user_id": "123e4567-e89b-12d3-a456-426614174000",
                 "temperature": 0.2,
-                "conversation_id": None
+                "conversation_id": None,
+                "user_datetime": "2024-10-20T14:30:00+05:30",
+                "user_timezone": "Asia/Kolkata"
             }
         }
 

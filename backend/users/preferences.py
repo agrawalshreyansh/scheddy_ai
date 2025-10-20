@@ -58,7 +58,10 @@ class UserPreference(Base):
     
     def get_work_hours(self):
         """Get work start and end hours as tuple"""
-        return (self.work_start_time.hour, self.work_end_time.hour)
+        # Ensure work times are not None
+        start_hour = self.work_start_time.hour if self.work_start_time else 9
+        end_hour = self.work_end_time.hour if self.work_end_time else 18
+        return (start_hour, end_hour)
     
     def to_dict(self):
         """Convert to dictionary"""

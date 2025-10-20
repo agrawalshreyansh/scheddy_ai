@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone, time
 from uuid import UUID
 from events.models import CalendarEvent, CalendarDate
 from events.schemas import CalendarEventCreate, CalendarEventUpdate, CalendarDateCreate, CalendarDateUpdate
@@ -246,8 +246,8 @@ def find_next_available_slot(
     end_search_date = current_date + timedelta(days=max_days_ahead)
     
     while current_date <= end_search_date:
-        day_start = datetime.combine(current_date, time(working_hours_start, 0))
-        day_end = datetime.combine(current_date, time(working_hours_end, 0))
+        day_start = datetime.combine(current_date, time(working_hours_start, 0), tzinfo=timezone.utc)
+        day_end = datetime.combine(current_date, time(working_hours_end, 0), tzinfo=timezone.utc)
         
         # Get events for this day
         events = get_events_by_date_range(db, day_start, day_end, user_id=user_id)
@@ -258,17 +258,21 @@ def find_next_available_slot(
         
         # Check gaps between events
         current_time = day_start
-        for event in sorted(events, key=lambda e: e.start_time):
+        for event in sorted(events, key=lambda e: e.start_time if e.start_time else day_start):
+            # Skip events with invalid times
+            if not event.start_time or not event.end_time:
+                continue
+                
             if current_time < event.start_time:
                 gap_duration = (event.start_time - current_time).total_seconds() / 60
-                if gap_duration >= duration_minutes:
+                if duration_minutes is not None and gap_duration >= duration_minutes:
                     return (current_time, current_time + timedelta(minutes=duration_minutes))
             current_time = max(current_time, event.end_time)
         
         # Check if there's time at the end of the day
         if current_time < day_end:
             remaining_duration = (day_end - current_time).total_seconds() / 60
-            if remaining_duration >= duration_minutes:
+            if duration_minutes is not None and remaining_duration >= duration_minutes:
                 return (current_time, current_time + timedelta(minutes=duration_minutes))
         
         # Move to next day

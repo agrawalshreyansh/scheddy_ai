@@ -59,12 +59,17 @@ async def chat_with_assistant(request: ChatRequest, db: Session = Depends(get_db
             user_id=request.user_id,
             user_message=request.prompt,
             temperature=request.temperature,
-            conversation_id=request.conversation_id
+            conversation_id=request.conversation_id,
+            user_datetime=request.user_datetime,
+            user_timezone=request.user_timezone
         )
         
         return ChatResponse(**result)
     
     except Exception as e:
+        import traceback
+        print(f"ERROR in chat endpoint: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=500, 
             detail=f"Error processing request: {str(e)}"

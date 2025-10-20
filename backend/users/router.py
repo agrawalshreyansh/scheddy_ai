@@ -7,6 +7,7 @@ from uuid import UUID
 from db.database import get_db
 from users.schemas import UserCreate, UserResponse, UserUpdate, LoginRequest, Token
 from users import controllers
+from users.preference_controllers import get_or_create_user_preference
 
 router = APIRouter(
     prefix="/users",
@@ -67,7 +68,13 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
-    return controllers.create_user(db=db, user=user)
+    # Create user
+    new_user = controllers.create_user(db=db, user=user)
+    
+    # Create default preferences for the user
+    get_or_create_user_preference(db, new_user.id)
+    
+    return new_user
 
 
 @router.get("/", response_model=List[UserResponse])

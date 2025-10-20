@@ -2,7 +2,7 @@
 Intelligent Scheduling Engine
 Handles automatic time slot finding, conflict resolution, and priority-based rescheduling
 """
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from typing import List, Optional, Tuple, Dict
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -37,19 +37,29 @@ class CalendarScheduler:
         PriorityTag.OPTIONAL: 1
     }
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_datetime: Optional[datetime] = None):
         self.db = db
+        # Store user_datetime for use in scheduling
+        if user_datetime is None:
+            user_datetime = datetime.now(timezone.utc)
+        elif user_datetime.tzinfo is None:
+            user_datetime = user_datetime.replace(tzinfo=timezone.utc)
+        self.user_datetime = user_datetime
     
     def parse_duration(self, duration_str: str) -> int:
         """
-        Parse duration string like '1h', '30m', '1h30m' to minutes
-        
-        Args:
-            duration_str: Duration in format like "1h", "30m", "1h30m"
+        Parse duration string like "2h", "30m", "1h30m" into total minutes
         
         Returns:
-            Duration in minutes
+            Total minutes (defaults to 30 if parsing fails)
         """
+        if not duration_str:
+            return 30
+        
+        # Ensure duration_str is a string
+        if not isinstance(duration_str, str):
+            duration_str = str(duration_str)
+        
         duration_str = duration_str.lower().strip()
         total_minutes = 0
         
@@ -85,6 +95,10 @@ class CalendarScheduler:
         Returns:
             Tuple of (priority_number, PriorityTag)
         """
+        # Ensure priority_tag is a string
+        if not isinstance(priority_tag, str):
+            priority_tag = str(priority_tag)
+            
         priority_tag_lower = priority_tag.lower().strip()
         
         if priority_tag_lower == "urgent":
@@ -135,9 +149,9 @@ class CalendarScheduler:
         Returns:
             List of (start_time, end_time) tuples for available slots
         """
-        # Set up the day boundaries
-        start_of_day = datetime.combine(date.date(), time(self.WORK_START_HOUR, 0))
-        end_of_day = datetime.combine(date.date(), time(self.WORK_END_HOUR, 0))
+        # Set up the day boundaries (timezone-aware)
+        start_of_day = datetime.combine(date.date(), time(self.WORK_START_HOUR, 0), tzinfo=timezone.utc)
+        end_of_day = datetime.combine(date.date(), time(self.WORK_END_HOUR, 0), tzinfo=timezone.utc)
         
         # Get all events for this day
         events = self.get_user_events_in_range(user_id, start_of_day, end_of_day)
@@ -149,9 +163,13 @@ class CalendarScheduler:
             # Check if there's a gap before this event
             event_start = event.start_time
             
+            # Skip events with invalid times
+            if not event_start or not event.end_time:
+                continue
+            
             if current_time < event_start:
                 gap_duration = (event_start - current_time).total_seconds() / 60
-                if gap_duration >= duration_minutes:
+                if duration_minutes is not None and gap_duration >= duration_minutes:
                     available_slots.append((current_time, event_start))
             
             # Move current_time to after this event
@@ -160,7 +178,7 @@ class CalendarScheduler:
         # Check if there's time at the end of the day
         if current_time < end_of_day:
             gap_duration = (end_of_day - current_time).total_seconds() / 60
-            if gap_duration >= duration_minutes:
+            if duration_minutes is not None and gap_duration >= duration_minutes:
                 available_slots.append((current_time, end_of_day))
         
         return available_slots
@@ -185,7 +203,7 @@ class CalendarScheduler:
             Tuple of (start_time, end_time) or None if no slot found
         """
         if preferred_date is None:
-            preferred_date = datetime.now()
+            preferred_date = self.user_datetime
         
         # Try to find a slot starting from preferred date
         for day_offset in range(max_days_ahead):
@@ -273,7 +291,7 @@ class CalendarScheduler:
         
         for event in conflicting_events:
             # Only reschedule if the new event has higher priority
-            if event.priority_number >= new_event_priority:
+            if event.priority_number is not None and event.priority_number >= new_event_priority:
                 continue
             
             # NEVER reschedule Priority 9-10 (Urgent/Critical) tasks
@@ -342,7 +360,7 @@ class CalendarScheduler:
             Dictionary with scheduling result and any rescheduled events
         """
         if preferred_date is None:
-            preferred_date = datetime.now()
+            preferred_date = self.user_datetime
         
         # First, try to find an available slot without conflicts
         best_slot = self.find_best_slot(
@@ -375,16 +393,17 @@ class CalendarScheduler:
             }
         
         # No available slot found, try to reschedule lower-priority events
-        if force_today or priority_number >= 7:  # High priority
+        if priority_number is not None and (force_today or priority_number >= 7):  # High priority
             # Propose a time slot (first available hour in working hours)
             proposed_start = datetime.combine(
                 preferred_date.date(),
-                time(self.WORK_START_HOUR, 0)
+                time(self.WORK_START_HOUR, 0),
+                tzinfo=timezone.utc
             )
             
             # Find first potential slot
-            day_start = datetime.combine(preferred_date.date(), time(self.WORK_START_HOUR, 0))
-            day_end = datetime.combine(preferred_date.date(), time(self.WORK_END_HOUR, 0))
+            day_start = datetime.combine(preferred_date.date(), time(self.WORK_START_HOUR, 0), tzinfo=timezone.utc)
+            day_end = datetime.combine(preferred_date.date(), time(self.WORK_END_HOUR, 0), tzinfo=timezone.utc)
             events = self.get_user_events_in_range(user_id, day_start, day_end)
             
             if events:
@@ -398,7 +417,7 @@ class CalendarScheduler:
                         gap_end = events[i].start_time
                     
                     gap_minutes = (gap_end - gap_start).total_seconds() / 60
-                    if gap_minutes >= duration_minutes:
+                    if duration_minutes is not None and gap_minutes >= duration_minutes:
                         proposed_start = gap_start
                         break
                 else:

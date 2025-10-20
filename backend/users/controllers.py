@@ -4,6 +4,7 @@ from users.schemas import UserCreate, UserUpdate
 from passlib.context import CryptContext
 from typing import Optional, List
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
 # Password hashing context with truncate_error disabled
 pwd_context = CryptContext(
@@ -111,7 +112,7 @@ def create_access_token(data: dict) -> str:
     from config import AuthConfig
     
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=AuthConfig.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=AuthConfig.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, AuthConfig.SECRET_KEY, algorithm=AuthConfig.ALGORITHM)
     return encoded_jwt

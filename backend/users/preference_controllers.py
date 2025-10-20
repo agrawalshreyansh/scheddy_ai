@@ -3,7 +3,7 @@ Controllers for managing user preferences and weekly goals
 """
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from users.preferences import UserPreference, WeeklyGoalTracker
 from events.models import CalendarEvent
@@ -70,7 +70,7 @@ def get_week_identifier(date: datetime = None) -> str:
         Week identifier string like "2024-W42"
     """
     if date is None:
-        date = datetime.now()
+        date = datetime.now(timezone.utc)
     
     year, week, _ = date.isocalendar()
     return f"{year}-W{week:02d}"
@@ -93,8 +93,8 @@ def get_week_start_end(week_identifier: str = None) -> tuple[datetime, datetime]
     year = int(year)
     week = int(week)
     
-    # Get first day of week (Monday)
-    jan_4 = datetime(year, 1, 4)
+    # Get first day of week (Monday) - timezone-aware
+    jan_4 = datetime(year, 1, 4, tzinfo=timezone.utc)
     week_start = jan_4 - timedelta(days=jan_4.weekday()) + timedelta(weeks=week - 1)
     week_end = week_start + timedelta(days=7)
     

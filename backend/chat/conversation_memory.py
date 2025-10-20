@@ -5,8 +5,8 @@ Stores chat history, embeddings, and provides context-aware retrieval
 import os
 import json
 from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta
-from uuid import UUID
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 import requests
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -16,6 +16,7 @@ from qdrant_client.models import (
     Filter,
     FieldCondition,
     MatchValue,
+    PayloadSchemaType,
 )
 from sqlalchemy.orm import Session
 
@@ -43,8 +44,27 @@ class ConversationMemory:
         self.client = get_qdrant_client()
         self._ensure_collections_exist()
     
+    def _make_serializable(self, obj: Any) -> Any:
+        """
+        Recursively convert non-JSON-serializable objects to serializable format.
+        Handles UUID, datetime, and other custom objects.
+        """
+        if isinstance(obj, UUID):
+            return str(obj)
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self._make_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_serializable(item) for item in obj]
+        elif hasattr(obj, '__dict__'):
+            # For custom objects, convert to dict
+            return self._make_serializable(obj.__dict__)
+        else:
+            return obj
+    
     def _ensure_collections_exist(self):
-        """Create Qdrant collections if they don't exist"""
+        """Create Qdrant collections if they don't exist and ensure indexes are created"""
         try:
             collections = self.client.get_collections().collections
             collection_names = [c.name for c in collections]
@@ -58,6 +78,33 @@ class ConversationMemory:
                         distance=Distance.COSINE
                     )
                 )
+                print(f"Created collection: {self.COLLECTION_NAME}")
+            
+            # Always ensure payload indexes exist for conversations (idempotent operation)
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.COLLECTION_NAME,
+                    field_name="user_id",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+                print(f"Created/verified index on {self.COLLECTION_NAME}.user_id")
+            except Exception as idx_err:
+                # Index might already exist, which is fine
+                if "already exists" not in str(idx_err).lower():
+                    print(f"Note: Index creation for {self.COLLECTION_NAME}.user_id: {idx_err}")
+            
+            # Create index for conversation_id
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.COLLECTION_NAME,
+                    field_name="conversation_id",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+                print(f"Created/verified index on {self.COLLECTION_NAME}.conversation_id")
+            except Exception as idx_err:
+                # Index might already exist, which is fine
+                if "already exists" not in str(idx_err).lower():
+                    print(f"Note: Index creation for {self.COLLECTION_NAME}.conversation_id: {idx_err}")
             
             # Create tasks collection
             if self.TASKS_COLLECTION_NAME not in collection_names:
@@ -68,6 +115,21 @@ class ConversationMemory:
                         distance=Distance.COSINE
                     )
                 )
+                print(f"Created collection: {self.TASKS_COLLECTION_NAME}")
+            
+            # Always ensure payload index exists for tasks (idempotent operation)
+            try:
+                self.client.create_payload_index(
+                    collection_name=self.TASKS_COLLECTION_NAME,
+                    field_name="user_id",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+                print(f"Created/verified index on {self.TASKS_COLLECTION_NAME}.user_id")
+            except Exception as idx_err:
+                # Index might already exist, which is fine
+                if "already exists" not in str(idx_err).lower():
+                    print(f"Note: Index creation for {self.TASKS_COLLECTION_NAME}: {idx_err}")
+                    
         except Exception as e:
             print(f"Error ensuring collections exist: {e}")
     
@@ -83,27 +145,72 @@ class ConversationMemory:
             List of floats representing the embedding vector
         """
         try:
-            # Using HuggingFace Inference API (free)
-            API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-            headers = {"Authorization": f"Bearer {os.getenv('HUGGINGFACE_API_KEY', '')}"}
+            api_key = os.getenv('HUGGINGFACE_API_KEY', '')
             
-            response = requests.post(
-                API_URL,
-                headers=headers,
-                json={"inputs": text, "options": {"wait_for_model": True}}
-            )
+            if not api_key:
+                print("Warning: HUGGINGFACE_API_KEY not set in environment variables")
+                print("Get a free API key at: https://huggingface.co/settings/tokens")
+                return [0.0] * self.EMBEDDING_DIM
             
-            if response.status_code == 200:
-                # Response is a list of embeddings, take the first one
-                embedding = response.json()
-                if isinstance(embedding, list) and len(embedding) > 0:
-                    # Handle nested list structure
-                    if isinstance(embedding[0], list):
-                        return embedding[0]
-                    return embedding
+            # Using HuggingFace Inference API - Feature Extraction endpoint
+            # Using BAAI/bge-small-en-v1.5 model (better compatibility)
+            API_URL = "https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5"
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+            
+            # Retry logic for model loading
+            max_retries = 3
+            for attempt in range(max_retries):
+                # Send text directly as string in "inputs" field
+                # The API will return a flat array of floats
+                response = requests.post(
+                    API_URL,
+                    headers=headers,
+                    json={"inputs": text, "options": {"wait_for_model": True}},
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    # Response format varies:
+                    # Could be [[float, float, ...]] or [float, float, ...]
+                    result = response.json()
+                    
+                    # If result is a nested list (batch format), take first element
+                    if isinstance(result, list):
+                        if len(result) > 0 and isinstance(result[0], list):
+                            # Nested: [[embedding]] -> take first
+                            return result[0]
+                        elif len(result) > 0 and isinstance(result[0], (int, float)):
+                            # Flat: [embedding] -> return as is
+                            return result
+                    
+                    # Fallback
+                    print(f"Unexpected embedding format: {type(result)}")
+                    return [0.0] * self.EMBEDDING_DIM
+                
+                elif response.status_code == 503:
+                    # Model is loading, wait and retry
+                    print(f"Model loading, attempt {attempt + 1}/{max_retries}...")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(2)
+                        continue
+                
+                elif response.status_code == 401:
+                    print("Invalid HuggingFace API key. Get one at: https://huggingface.co/settings/tokens")
+                    break
+                    
+                elif response.status_code == 404:
+                    print(f"Model endpoint not found. Check API URL: {API_URL}")
+                    break
+                    
+                else:
+                    print(f"Embedding API failed: {response.status_code}")
+                    print(f"Response: {response.text[:200]}")
+                    break
             
             # Fallback: return zero vector if API fails
-            print(f"Embedding API failed: {response.status_code}")
             return [0.0] * self.EMBEDDING_DIM
             
         except Exception as e:
@@ -130,40 +237,42 @@ class ConversationMemory:
             conversation_id: ID to track multi-turn conversations
             
         Returns:
-            Point ID in Qdrant
+            Point ID in Qdrant (as string)
         """
         try:
             # Generate embedding
             embedding = self.get_embedding(content)
             
-            # Create unique point ID
-            point_id = f"{user_id}_{datetime.utcnow().timestamp()}"
+            # Create unique point ID as UUID (required by Qdrant)
+            point_id = uuid4()
             
             # Prepare payload
             payload = {
                 "user_id": str(user_id),
                 "role": role,
                 "content": content,
-                "timestamp": datetime.utcnow().isoformat(),
-                "conversation_id": conversation_id or point_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "conversation_id": conversation_id or str(point_id),
             }
             
             if intent_data:
-                payload["intent_data"] = json.dumps(intent_data)
+                # Convert UUIDs and other non-serializable objects to strings
+                serializable_intent = self._make_serializable(intent_data)
+                payload["intent_data"] = json.dumps(serializable_intent)
             
             # Store in Qdrant
             self.client.upsert(
                 collection_name=self.COLLECTION_NAME,
                 points=[
                     PointStruct(
-                        id=point_id,
+                        id=str(point_id),
                         vector=embedding,
                         payload=payload
                     )
                 ]
             )
             
-            return point_id
+            return str(point_id)
             
         except Exception as e:
             print(f"Error storing message: {e}")
@@ -198,8 +307,8 @@ class ConversationMemory:
             text = f"{title}. {description or ''}"
             embedding = self.get_embedding(text)
             
-            # Point ID based on event
-            point_id = f"task_{event_id}"
+            # Use event_id as point ID (already a UUID)
+            point_id = str(event_id)
             
             payload = {
                 "user_id": str(user_id),
@@ -210,7 +319,7 @@ class ConversationMemory:
                 "priority": priority,
                 "start_time": start_time.isoformat(),
                 "duration_minutes": duration_minutes,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             self.client.upsert(
@@ -248,7 +357,7 @@ class ConversationMemory:
         """
         try:
             query_embedding = self.get_embedding(query)
-            cutoff_date = (datetime.utcnow() - timedelta(days=days_back)).isoformat()
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
             
             results = self.client.search(
                 collection_name=self.COLLECTION_NAME,
@@ -267,13 +376,14 @@ class ConversationMemory:
             conversations = []
             for result in results:
                 payload = result.payload
-                # Filter by date
-                if payload.get("timestamp", "") >= cutoff_date:
+                # Filter by date - check if timestamp exists and is valid
+                timestamp = payload.get("timestamp")
+                if timestamp and timestamp >= cutoff_date:
                     conversations.append({
                         "role": payload.get("role"),
                         "content": payload.get("content"),
-                        "timestamp": payload.get("timestamp"),
-                        "score": result.score,
+                        "timestamp": timestamp,
+                        "score": result.score if result.score is not None else 0.0,
                         "intent_data": json.loads(payload.get("intent_data", "{}")) if payload.get("intent_data") else None
                     })
             
@@ -327,7 +437,7 @@ class ConversationMemory:
                     "priority": payload.get("priority"),
                     "duration_minutes": payload.get("duration_minutes"),
                     "start_time": payload.get("start_time"),
-                    "similarity_score": result.score
+                    "similarity_score": result.score if result.score is not None else 0.0
                 })
             
             return tasks
@@ -357,8 +467,8 @@ class ConversationMemory:
             # Search for similar tasks
             similar_tasks = self.search_similar_tasks(user_id, task_title, limit=10)
             
-            # Filter high-similarity tasks (>0.8 score)
-            recurring = [t for t in similar_tasks if t['similarity_score'] > 0.8]
+            # Filter high-similarity tasks (>0.8 score) - ensure score is not None
+            recurring = [t for t in similar_tasks if t.get('similarity_score') is not None and t['similarity_score'] > 0.8]
             
             if len(recurring) >= 2:
                 # Calculate average duration
@@ -439,10 +549,14 @@ class ConversationMemory:
         
         # 4. Recent schedule (next 7 days)
         try:
-            today = datetime.now().date()
+            today = datetime.now(timezone.utc).date()
             week_end = today + timedelta(days=7)
+            # Fix: Correct parameter order - start_date, end_date, user_id
             recent_events = get_events_by_date_range(
-                db, user_id, today, week_end
+                db, 
+                datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc),
+                datetime.combine(week_end, datetime.max.time(), tzinfo=timezone.utc),
+                user_id
             )
             if recent_events:
                 context_parts.append(f"\n## Upcoming Schedule (Next 7 Days): {len(recent_events)} events")

@@ -5,9 +5,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 from uuid import UUID
-from pydantic import BaseModel, Field
 from datetime import time
 from db.database import get_db
+from users.schemas import PreferenceUpdate, WeeklyGoalsUpdate
 from users.preference_controllers import (
     get_or_create_user_preference,
     update_user_preference,
@@ -20,28 +20,6 @@ router = APIRouter(
     prefix="/preferences",
     tags=["preferences"]
 )
-
-
-class PreferenceUpdate(BaseModel):
-    """Schema for updating user preferences"""
-    work_start_hour: int | None = Field(None, ge=0, le=23, description="Work start hour (0-23)")
-    work_start_minute: int | None = Field(None, ge=0, le=59, description="Work start minute")
-    work_end_hour: int | None = Field(None, ge=0, le=23, description="Work end hour (0-23)")
-    work_end_minute: int | None = Field(None, ge=0, le=59, description="Work end minute")
-    work_days: list[int] | None = Field(None, description="Work days (0=Monday, 6=Sunday)")
-    prefer_morning: bool | None = Field(None, description="Prefer morning time slots")
-    allow_auto_reschedule: bool | None = Field(None, description="Allow automatic rescheduling")
-    max_tasks_per_day: int | None = Field(None, ge=1, le=20, description="Maximum tasks per day")
-    lunch_break_hour: int | None = Field(None, ge=0, le=23, description="Lunch break hour")
-    lunch_break_minute: int | None = Field(None, ge=0, le=59, description="Lunch break minute")
-    lunch_break_duration: int | None = Field(None, ge=0, le=120, description="Lunch break duration in minutes")
-    min_break_between_tasks: int | None = Field(None, ge=0, le=60, description="Minimum break between tasks in minutes")
-    weekly_goals: Dict[str, int] | None = Field(None, description="Weekly goals in hours per category")
-
-
-class WeeklyGoalsUpdate(BaseModel):
-    """Schema for updating weekly goals"""
-    weekly_goals: Dict[str, int] = Field(..., description="Weekly goals in hours per category")
 
 
 @router.get("/{user_id}")

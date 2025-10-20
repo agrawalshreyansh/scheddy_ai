@@ -1,6 +1,8 @@
 'use client';
 
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { fetchEventsByDateRange, fetchAllEvents } from '@/lib/api';
+import { getStartOfWeek, getEndOfWeek, getStartOfMonth, getEndOfMonth } from '@/lib/dateUtils';
 
 const CalendarContext = createContext();
 
@@ -15,6 +17,9 @@ export const useCalendar = () => {
 export const CalendarProvider = ({ children }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState('Week'); // 'Day', 'Week', or 'Month'
+  const [events, setEvents] = useState([]);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [eventsError, setEventsError] = useState(null);
 
   // Get the start of the week (Sunday)
   const getWeekStart = (date) => {
@@ -77,6 +82,60 @@ export const CalendarProvider = ({ children }) => {
     setCurrentDate(new Date());
   };
 
+  // Fetch events based on current view and date
+  const fetchEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    setEventsError(null);
+    
+    try {
+      let startDate, endDate;
+      
+      if (view === 'Day') {
+        startDate = new Date(currentDate);
+        startDate.setHours(0, 0, 0, 0);
+        endDate = new Date(currentDate);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (view === 'Week') {
+        startDate = getStartOfWeek(currentDate);
+        endDate = getEndOfWeek(currentDate);
+      } else if (view === 'Month') {
+        startDate = getStartOfMonth(currentDate);
+        endDate = getEndOfMonth(currentDate);
+      }
+      
+      const fetchedEvents = await fetchEventsByDateRange(startDate, endDate);
+      setEvents(fetchedEvents);
+    } catch (error) {
+      console.error('Error fetching events:', error);
+      setEventsError(error.message);
+      setEvents([]);
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  }, [currentDate, view]);
+
+  // Fetch events when view or date changes
+  useEffect(() => {
+    fetchEvents();
+  }, [fetchEvents]);
+
+  // Refresh events (call this after creating/updating/deleting events)
+  const refreshEvents = () => {
+    fetchEvents();
+  };
+
+  // Get events for a specific date
+  const getEventsForDate = (date) => {
+    return events.filter(event => {
+      const eventDate = new Date(event.start_time);
+      return (
+        eventDate.getDate() === date.getDate() &&
+        eventDate.getMonth() === date.getMonth() &&
+        eventDate.getFullYear() === date.getFullYear()
+      );
+    });
+  };
+
   // Format date range for header display
   const getDateRangeString = () => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -134,6 +193,11 @@ export const CalendarProvider = ({ children }) => {
     goToToday,
     getDateRangeString,
     isToday,
+    events,
+    isLoadingEvents,
+    eventsError,
+    refreshEvents,
+    getEventsForDate,
   };
 
   return (

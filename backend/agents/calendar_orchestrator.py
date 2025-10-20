@@ -3,7 +3,7 @@ Calendar Orchestrator
 Coordinates between LLM intent extraction and scheduling engine to execute user commands
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -121,7 +121,7 @@ class CalendarOrchestrator:
             priority_tag=priority_tag,
             preferred_date=preferred_date,
             description=description,
-            force_today=force_today or (when == 'today' and priority_number >= 7)
+            force_today=force_today or (when == 'today' and priority_number is not None and priority_number >= 7)
         )
         
         # Format the response
@@ -254,25 +254,25 @@ class CalendarOrchestrator:
         when = intent_data.get('when')
         
         if when == 'today':
-            start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             end_date = start_date + timedelta(days=1)
         elif when == 'tomorrow':
-            start_date = (datetime.now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             end_date = start_date + timedelta(days=1)
         elif when == 'this_week':
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             # Get Monday of this week
             days_since_monday = today.weekday()
             start_date = today - timedelta(days=days_since_monday)
             end_date = start_date + timedelta(days=7)
         elif when == 'next_week':
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             days_since_monday = today.weekday()
             start_date = today - timedelta(days=days_since_monday) + timedelta(days=7)
             end_date = start_date + timedelta(days=7)
         else:
             # Default: next 7 days
-            start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             end_date = start_date + timedelta(days=7)
         
         events = get_events_by_date_range(self.db, start_date, end_date, user_id=user_id)
@@ -320,7 +320,7 @@ class CalendarOrchestrator:
         Returns:
             Datetime object representing the preferred date
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         if when == 'today':
             return now

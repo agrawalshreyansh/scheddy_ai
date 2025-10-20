@@ -1,13 +1,118 @@
 // components/Sidebar.jsx
 'use client';
 import React, { useState } from 'react';
-import { Plus, ChevronLeft, ChevronRight, X, Calendar, Clock, MapPin, Users, AlignLeft } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Calendar, Clock, MapPin, Users, AlignLeft, Loader2 } from 'lucide-react';
 import { useCalendar } from '../context/CalendarContext';
+import { createEvent } from '@/lib/api';
 
 const Sidebar = () => {
-  const { currentDate, setCurrentDate, isToday } = useCalendar();
+  const { currentDate, setCurrentDate, isToday, refreshEvents } = useCalendar();
   const [miniCalendarDate, setMiniCalendarDate] = useState(new Date());
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  // Form state
+  const [formData, setFormData] = useState({
+    task_title: '',
+    description: '',
+    event_date: '',
+    start_time: '',
+    end_time: '',
+    priority_number: 5,
+    priority_tag: 'medium',
+    location: '',
+    guests: '',
+    calendar_type: 'Personal'
+  });
+
+  // Reset form
+  const resetForm = () => {
+    setFormData({
+      task_title: '',
+      description: '',
+      event_date: '',
+      start_time: '',
+      end_time: '',
+      priority_number: 5,
+      priority_tag: 'medium',
+      location: '',
+      guests: '',
+      calendar_type: 'Personal'
+    });
+    setError('');
+  };
+
+  // Handle form input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Handle create event
+  const handleCreateEvent = async () => {
+    try {
+      setError('');
+      setIsCreating(true);
+
+      // Validation
+      if (!formData.task_title.trim()) {
+        setError('Event title is required');
+        return;
+      }
+      if (!formData.event_date) {
+        setError('Date is required');
+        return;
+      }
+      if (!formData.start_time) {
+        setError('Start time is required');
+        return;
+      }
+      if (!formData.end_time) {
+        setError('End time is required');
+        return;
+      }
+
+      // Combine date and time to create datetime objects
+      const startDateTime = new Date(`${formData.event_date}T${formData.start_time}`);
+      const endDateTime = new Date(`${formData.event_date}T${formData.end_time}`);
+
+      // Validate end time is after start time
+      if (endDateTime <= startDateTime) {
+        setError('End time must be after start time');
+        return;
+      }
+
+      // Prepare event data
+      const eventData = {
+        task_title: formData.task_title.trim(),
+        description: formData.description.trim() || null,
+        start_time: startDateTime,
+        end_time: endDateTime,
+        priority_number: parseInt(formData.priority_number),
+        priority_tag: formData.priority_tag
+      };
+
+      // Create event via API
+      await createEvent(eventData);
+
+      // Success - close modal and refresh events
+      setIsModalOpen(false);
+      resetForm();
+      refreshEvents();
+      
+      // Show success message (optional)
+      alert('Event created successfully!');
+    } catch (error) {
+      console.error('Error creating event:', error);
+      setError(error.message || 'Failed to create event. Please try again.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   // Get the first day of the month
   const getFirstDayOfMonth = (date) => {
@@ -163,47 +268,123 @@ const Sidebar = () => {
           <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Create Event</h2>
             <button
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => {
+                setIsModalOpen(false);
+                resetForm();
+              }}
               className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              disabled={isCreating}
             >
               <X size={24} className="text-gray-500 dark:text-gray-400" />
             </button>
           </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="mx-6 mt-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
 
           {/* Modal Body */}
           <div className="p-6 space-y-6">
             {/* Event Title */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Event Title
+                Event Title *
               </label>
               <input
                 type="text"
+                name="task_title"
+                value={formData.task_title}
+                onChange={handleInputChange}
                 placeholder="Add title"
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                disabled={isCreating}
               />
             </div>
 
             {/* Date and Time */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   <Calendar size={16} className="inline mr-2" />
-                  Date
+                  Date *
                 </label>
                 <input
                   type="date"
+                  name="event_date"
+                  value={formData.event_date}
+                  onChange={handleInputChange}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                  disabled={isCreating}
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <Clock size={16} className="inline mr-2" />
+                    Start Time *
+                  </label>
+                  <input
+                    type="time"
+                    name="start_time"
+                    value={formData.start_time}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                    disabled={isCreating}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <Clock size={16} className="inline mr-2" />
+                    End Time *
+                  </label>
+                  <input
+                    type="time"
+                    name="end_time"
+                    value={formData.end_time}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                    disabled={isCreating}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Priority */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Priority Tag
+                </label>
+                <select
+                  name="priority_tag"
+                  value={formData.priority_tag}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                  disabled={isCreating}
+                >
+                  <option value="urgent">Urgent</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                  <option value="optional">Optional</option>
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  <Clock size={16} className="inline mr-2" />
-                  Time
+                  Priority Number (1-10)
                 </label>
                 <input
-                  type="time"
+                  type="number"
+                  name="priority_number"
+                  min="1"
+                  max="10"
+                  value={formData.priority_number}
+                  onChange={handleInputChange}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                  disabled={isCreating}
                 />
               </div>
             </div>
@@ -216,8 +397,12 @@ const Sidebar = () => {
               </label>
               <input
                 type="text"
+                name="location"
+                value={formData.location}
+                onChange={handleInputChange}
                 placeholder="Add location"
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                disabled={isCreating}
               />
             </div>
 
@@ -229,8 +414,12 @@ const Sidebar = () => {
               </label>
               <input
                 type="email"
+                name="guests"
+                value={formData.guests}
+                onChange={handleInputChange}
                 placeholder="Add guest emails"
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                disabled={isCreating}
               />
             </div>
 
@@ -241,9 +430,13 @@ const Sidebar = () => {
                 Description
               </label>
               <textarea
+                name="description"
+                value={formData.description}
+                onChange={handleInputChange}
                 placeholder="Add description"
                 rows="4"
                 className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-[#137fec] focus:border-transparent resize-none"
+                disabled={isCreating}
               />
             </div>
 
@@ -252,7 +445,13 @@ const Sidebar = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Calendar
               </label>
-              <select className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent">
+              <select
+                name="calendar_type"
+                value={formData.calendar_type}
+                onChange={handleInputChange}
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-[#137fec] focus:border-transparent"
+                disabled={isCreating}
+              >
                 <option>Personal</option>
                 <option>Work</option>
                 <option>Reminders</option>
@@ -263,19 +462,22 @@ const Sidebar = () => {
           {/* Modal Footer */}
           <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
             <button
-              onClick={() => setIsModalOpen(false)}
-              className="px-6 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              onClick={() => {
+                setIsModalOpen(false);
+                resetForm();
+              }}
+              className="px-6 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isCreating}
             >
               Cancel
             </button>
             <button
-              onClick={() => {
-                // Handle save event logic here
-                setIsModalOpen(false);
-              }}
-              className="px-6 py-2.5 rounded-lg bg-[#137fec] text-white font-medium hover:bg-[#0d5fb8] transition-colors shadow-lg"
+              onClick={handleCreateEvent}
+              className="px-6 py-2.5 rounded-lg bg-[#137fec] text-white font-medium hover:bg-[#0d5fb8] transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              disabled={isCreating}
             >
-              Create Event
+              {isCreating && <Loader2 size={16} className="animate-spin" />}
+              {isCreating ? 'Creating...' : 'Create Event'}
             </button>
           </div>
         </div>
