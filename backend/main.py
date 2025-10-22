@@ -73,3 +73,8 @@ def test_qdrant():
         return {"status": "error", "message": str(e)}
 
 
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
