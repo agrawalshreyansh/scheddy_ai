@@ -98,7 +98,7 @@ def ask_llm_for_clarification(
     })
     
     payload = {
-        "model": "meta-llama/llama-3.2-3b-instruct:free",
+        "model": "x-ai/grok-4",
         "messages": messages,
         "temperature": temperature
     }

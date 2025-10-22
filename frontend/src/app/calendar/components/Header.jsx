@@ -1,6 +1,6 @@
 // components/Header.jsx
 'use client';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCalendar } from '../context/CalendarContext';
@@ -8,6 +8,50 @@ import { useCalendar } from '../context/CalendarContext';
 const Header = () => {
   const router = useRouter();
   const { goToPrevious, goToNext, goToToday, getDateRangeString, view, setView } = useCalendar();
+  const [userInitials, setUserInitials] = useState('');
+  const [avatarColor, setAvatarColor] = useState('bg-blue-500');
+
+  // Load user data and generate initials
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const userData = JSON.parse(storedUser);
+        let firstName = '';
+        let lastName = '';
+
+        // Parse name if it's in full name format
+        if (userData.full_name) {
+          const nameParts = userData.full_name.trim().split(' ');
+          firstName = nameParts[0] || '';
+          lastName = nameParts.slice(1).join(' ') || '';
+        }
+
+        // Generate initials
+        const firstInitial = firstName.trim().charAt(0).toUpperCase();
+        const lastInitial = lastName.trim().charAt(0).toUpperCase();
+        setUserInitials(firstInitial + lastInitial || '?');
+
+        // Generate avatar color
+        const colors = [
+          'bg-blue-500',
+          'bg-green-500',
+          'bg-purple-500',
+          'bg-pink-500',
+          'bg-yellow-500',
+          'bg-red-500',
+          'bg-indigo-500',
+          'bg-teal-500',
+        ];
+        const nameString = (firstName + lastName).toLowerCase();
+        const index = nameString.charCodeAt(0) % colors.length;
+        setAvatarColor(colors[index] || 'bg-blue-500');
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+        setUserInitials('?');
+      }
+    }
+  }, []);
 
   return (
     <header className="flex items-center justify-between whitespace-nowrap border-b border-gray-200 dark:border-gray-700 px-6 py-3">
@@ -52,12 +96,11 @@ const Header = () => {
         
         <button
           onClick={() => router.push('/profile')}
-          className="h-10 w-10 rounded-full bg-cover bg-center hover:ring-2 hover:ring-[#137fec] transition-all cursor-pointer"
-          style={{
-            backgroundImage: `url("https://lh3.googleusercontent.com/aida-public/AB6AXuCykV1G_iYJ0U32BQwePm5OQ9rZ20HXpO_ADHX6rORAbh_cdPBydpEW8RfxFLksKVOFcrGi1FmfLazVcG_4-iaB10ovT8UHYgYgh07Q5msVXaNAj6xJv1KT473BlLC1Z7RubtIaeKO8zjBUDERbvDaGBElMG2qlSGUEh5eHxbAw2CX-84A1WPU05HCfVwpUHBn0unTXPUOx6CnS7NPjsAfREuENqu7JvnrRq-38IyIPv2lPESD7N46qnE8XgCfsjRbit_7n67OF8w")`
-          }}
+          className={`h-10 w-10 rounded-full ${avatarColor} flex items-center justify-center text-white text-sm font-bold hover:ring-2 hover:ring-[#137fec] transition-all cursor-pointer shadow-md`}
           aria-label="Go to profile"
-        />
+        >
+          {userInitials}
+        </button>
       </div>
     </header>
   );
