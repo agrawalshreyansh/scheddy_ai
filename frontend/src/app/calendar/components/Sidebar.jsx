@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, LogOut } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import MiniCalendar from './sidebar/MiniCalendar';
 import CreateEventModal from './modals/CreateEventModal';
 
@@ -10,6 +11,14 @@ import CreateEventModal from './modals/CreateEventModal';
  */
 const Sidebar = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const router = useRouter();
+
+  const handleLogout = () => {
+    // Clear all localStorage data
+    localStorage.clear();
+    // Redirect to auth page
+    router.push('/auth');
+  };
 
   return (
     <>
@@ -44,6 +53,17 @@ const Sidebar = () => {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* Logout Button */}
+        <div className="mt-auto pt-4">
+          <button 
+            onClick={handleLogout}
+            className="flex items-center justify-center gap-2 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#1a2332] px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 transition-all hover:border-[#137fec] hover:text-[#137fec] hover:bg-gray-50 dark:hover:bg-[#101922] shadow-sm"
+          >
+            <LogOut size={18} />
+            <span>Logout</span>
+          </button>
         </div>
       </aside>
 

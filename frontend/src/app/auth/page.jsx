@@ -16,12 +16,14 @@ const Page = () => {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
     setLoading(true);
 
     try {
@@ -45,9 +47,16 @@ const Page = () => {
           throw new Error(errorData.detail || 'Sign up failed');
         }
 
-        const userData = await response.json();
-        localStorage.setItem('user', JSON.stringify(userData));
-        router.push('/calendar');
+        // Account created successfully - show success message and switch to login mode
+        setSuccessMessage('Account created successfully! Please log in to continue.');
+        setFormData({
+          username: formData.username, // Keep username for convenience
+          email: '',
+          password: '',
+          fullName: '',
+          rememberMe: false,
+        });
+        setIsSignUp(false); // Switch to login mode
       } else {
         // Login logic
         const response = await fetch(`${API_BASE_URL}/users/login`, {
@@ -88,6 +97,7 @@ const Page = () => {
   const toggleMode = () => {
     setIsSignUp(!isSignUp);
     setError('');
+    setSuccessMessage('');
   };
 
   return (
@@ -154,6 +164,12 @@ const Page = () => {
           {error && (
             <div className="rounded-lg bg-red-500/10 border border-red-500/50 p-3 text-sm text-red-400">
               {error}
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="rounded-lg bg-green-500/10 border border-green-500/50 p-3 text-sm text-green-400">
+              {successMessage}
             </div>
           )}
 
